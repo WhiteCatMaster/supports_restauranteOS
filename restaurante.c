@@ -10,6 +10,8 @@
 #include <string.h>
 
 pid_t pid_sala, pid_cocina;
+sem_t sem_preparacion;
+sem_t sem_cocina;
 
 int tiempo_aleatorio(int min, int max) {
     return rand() % (max - min + 1) + min;
@@ -31,10 +33,11 @@ void* preparar_ingredientes(void* args) {
 void* cocinar(void* arg) {
 
     while (1) {
-
+        sem_wait(&sem_preparacion);
         printf("[Cocina] Cocinando plato...\n");
         sleep(tiempo_aleatorio(4, 8));
         printf("[Cocina] Plato cocinado.\n");
+        sem_post(&sem_cocina);
 
     }
 }
