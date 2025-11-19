@@ -10,6 +10,7 @@
 #include <string.h>
 
 pid_t pid_sala, pid_cocina;
+mqd_t mq_cocina_fd;
 sem_t sem_preparacion;
 sem_t sem_cocina;
 
@@ -17,17 +18,38 @@ int tiempo_aleatorio(int min, int max) {
     return rand() % (max - min + 1) + min;
 }
 
+#define MAX_SIZE 128
+#define MSG_BUFFER_SIZE (MAX_SIZE + 1)
+
 void* preparar_ingredientes(void* args) {
-    char buffer[128];
+    char buffer[MSG_BUFFER_SIZE];
+    ssize_t bytes_read;
+    
     while (1) {
+        printf("[Preparación] Esperando comanda de la Sala...\n");
 
-        printf("[Preparación] Esperando comanda...\n");
+        bytes_read = mq_receive(mq_cocina_fd, buffer, MSG_BUFFER_SIZE, NULL);
 
+        //El -1 indica que la funcion ha fallado y que no ha podido recibir el mensaje
+        if (bytes_read == -1) {
+            perror("[Preparación] Error al recibir mensaje de la cola");
+            continue; 
+        }
+
+        //Al parecer se asegura de que el mensaje recibido sea tratado como un string
+        buffer[bytes_read] = '\0'; 
+        
         printf("[Preparación] Recibida comanda: %s. Preparando ingredientes...\n", buffer);
-        sleep(tiempo_aleatorio(3, 6));
-        printf("[Preparación] Ingredientes listos.\n");
-
+        
+        sleep(tiempo_aleatorio(3, 6)); 
+        printf("[Preparación] Ingredientes listos para cocinar.\n");
+        
+        if (sem_post(&sem_ingredientes_listos) == -1) {
+            perror("[Preparación] Error al hacer sem_post");
+        }
     }
+    
+    // pthread_exit(NULL); // Aunque inalcanzable en un bucle infinito
 }
 
 void* cocinar(void* arg) {
