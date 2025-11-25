@@ -113,15 +113,30 @@ int main(int argc, char *argv[]) {
     /* Proceso Sala */
     printf("[Sala] Inicio de la gestión de comandas...\n");
 
+    struct mq_attr attr;
+    attr.mq_flags = 0;
+    attr.mq_maxmsg = 10;      
+    attr.mq_msgsize = MAX_SIZE;
+    attr.mq_curmsgs = 0;
+
+    
+    mq_cocina_fd = mq_open(NOMBRE_COLA, O_CREAT | O_WRONLY, 0644, &attr);
+    char mensaje_comanda[MAX_SIZE];
+
     int num_comanda = 0;
 
     while (1) {
 
       sleep(tiempo_aleatorio(5, 10));
+      
       printf("[Sala] Recibida comanda de cliente. Solicitando plato de la "
              "comanda nº %d a la cocina...\n",
              num_comanda);
 
+      sprintf(mensaje_comanda, "Mesa_%d_Plato_del_dia", num_comanda);       
+
+      mq_send(mq_cocina_fd, mensaje_comanda, strlen(mensaje_comanda) + 1, 1);
+    
       num_comanda++;
     }
   }
