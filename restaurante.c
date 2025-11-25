@@ -10,6 +10,7 @@
 #include <unistd.h>
 
 pid_t pid_sala, pid_cocina;
+sem_t sem_ingredientes_listos;
 mqd_t mq_cocina_fd;
 sem_t sem_preparacion;
 sem_t sem_cocina;
@@ -51,11 +52,11 @@ void *preparar_ingredientes(void *args) {
 
     sleep(tiempo_aleatorio(3, 6));
     printf("[Preparación] Ingredientes listos para cocinar.\n");
-    /*
+
      if (sem_post(&sem_ingredientes_listos) == -1) {
          perror("[Preparación] Error al hacer sem_post");
      }
-     */
+
   }
 
   // pthread_exit(NULL); // Aunque inalcanzable en un bucle infinito
@@ -64,7 +65,7 @@ void *preparar_ingredientes(void *args) {
 void *cocinar(void *arg) {
 
   while (1) {
-    sem_wait(&sem_preparacion);
+    sem_wait(&sem_ingredientes_listos);
     printf("[Cocina] Cocinando plato...\n");
     sleep(tiempo_aleatorio(4, 8));
     printf("[Cocina] Plato cocinado.\n");
@@ -108,6 +109,11 @@ int main(int argc, char *argv[]) {
     } else {
       /* Proceso Cocina */
       printf("[Cocina] Comienzo de la preparación de platos...\n");
+
+      if (sem_init(&sem_ingredientes_listos, 0, 0) == -1) {
+        perror("Error al inicializar semáforo sem_ingredientes_listos");
+        exit(EXIT_FAILURE);
+}
     }
   } else {
     /* Proceso Sala */
