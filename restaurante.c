@@ -8,6 +8,7 @@
 #include <string.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#define NOMBRE_COLA "/cola_cocina"
 
 pid_t pid_sala, pid_cocina;
 sem_t sem_ingredientes_listos;
@@ -15,6 +16,11 @@ mqd_t mq_cocina_fd;
 sem_t sem_preparacion;
 sem_t sem_cocina;
 sem_t sem_emplatar;
+
+void manejador_plato_listo(int senial) {
+  printf("[Cocina] Señal recibida: Plato listo para emplatar.\n");
+  sem_post(&sem_emplatar);
+}
 
 int tiempo_aleatorio(int min, int max) {
   return rand() % (max - min + 1) + min;
@@ -36,6 +42,9 @@ void *preparar_ingredientes(void *args) {
 
     bytes_read = mq_receive(mq_cocina_fd, buffer, MSG_BUFFER_SIZE, NULL);
 
+    // Al parecer se asegura de que el mensaje recibido sea tratado como un
+    // string
+    buffer[bytes_read] = '\0';
     // El -1 indica que la funcion ha fallado y que no ha podido recibir el
     // mensaje
     if (bytes_read == -1) {
@@ -43,9 +52,6 @@ void *preparar_ingredientes(void *args) {
       continue;
     }
 
-    // Al parecer se asegura de que el mensaje recibido sea tratado como un
-    // string
-    buffer[bytes_read] = '\0';
 
     printf("[Preparación] Recibida comanda: %s. Preparando ingredientes...\n",
            buffer);
@@ -108,13 +114,31 @@ int main(int argc, char *argv[]) {
 
     } else {
       /* Proceso Cocina */
+
+
+      // de aqui 
+      pthread_t hilo_preparacion, hilo_cocinar, hilo_emplatar;
+
+
+      pthread_create(&hilo_preparacion, NULL, preparar_ingredientes, NULL);
+      pthread_create(&hilo_cocinar, NULL, cocinar, NULL);
+      pthread_create(&hilo_emplatar, NULL, emplatar, NULL);
+
+      // Esperar finalización (aunque los hilos son infinitos)
+      pthread_join(hilo_preparacion, NULL);
+      pthread_join(hilo_cocinar, NULL);
+      pthread_join(hilo_emplatar, NULL);
       printf("[Cocina] Comienzo de la preparación de platos...\n");
+
+
 
       if (sem_init(&sem_ingredientes_listos, 0, 0) == -1) {
         perror("Error al inicializar semáforo sem_ingredientes_listos");
         exit(EXIT_FAILURE);
-}
+      }
+      // hasta aqui esta chikistrikis
     }
+
   } else {
     /* Proceso Sala */
     printf("[Sala] Inicio de la gestión de comandas...\n");
@@ -130,7 +154,8 @@ int main(int argc, char *argv[]) {
     char mensaje_comanda[MAX_SIZE];
 
     int num_comanda = 0;
-
+    signal(SIGALRM, manejador_plato_listo);
+    
     while (1) {
 
       sleep(tiempo_aleatorio(5, 10));
@@ -139,10 +164,14 @@ int main(int argc, char *argv[]) {
              "comanda nº %d a la cocina...\n",
              num_comanda);
 
+
+        
+
       sprintf(mensaje_comanda, "Mesa_%d_Plato_del_dia", num_comanda);       
 
       mq_send(mq_cocina_fd, mensaje_comanda, strlen(mensaje_comanda) + 1, 1);
-    
+        
+      
       num_comanda++;
     }
   }
