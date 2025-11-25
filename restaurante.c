@@ -18,8 +18,8 @@ sem_t sem_cocina;
 sem_t sem_emplatar;
 
 void manejador_plato_listo(int senial) {
-  printf("[Cocina] Señal recibida: Plato listo para emplatar.\n");
-  sem_post(&sem_emplatar);
+
+  printf("[Sala] Señal recibida: Plato listo en cocina.\n");
 }
 
 int tiempo_aleatorio(int min, int max) {
@@ -42,14 +42,18 @@ void *preparar_ingredientes(void *args) {
 
     bytes_read = mq_receive(mq_cocina_fd, buffer, MSG_BUFFER_SIZE, NULL);
 
-    // Al parecer se asegura de que el mensaje recibido sea tratado como un
-    // string
-    buffer[bytes_read] = '\0';
-    // El -1 indica que la funcion ha fallado y que no ha podido recibir el
-    // mensaje
+    /* Comprobar errores antes de usar bytes_read como índice */
     if (bytes_read == -1) {
       perror("[Preparación] Error al recibir mensaje de la cola");
       continue;
+    }
+    /* asegurar terminador de cadena (bytes_read < MSG_BUFFER_SIZE) */
+    // esto ni idea de lo q hace
+    if (bytes_read >= MSG_BUFFER_SIZE) {
+      /* truncar por seguridad */
+      buffer[MSG_BUFFER_SIZE - 1] = '\0';
+    } else {
+      buffer[bytes_read] = '\0';
     }
 
 
@@ -84,7 +88,8 @@ void *emplatar(void *arg) {
 
   while (1) {
     // Tengo que esperar a que haya comida cocinada para emplatar
-    sem_wait(&sem_emplatar);
+    /* Debe esperar a que la cocina señale que el plato está cocinado */
+    sem_wait(&sem_cocina);
     printf("[Emplatado] Emplatando el plato...\n");
     sleep(tiempo_aleatorio(2, 4));
     printf("[Emplatado] Plato listo y emplatado.\n");
@@ -111,32 +116,37 @@ int main(int argc, char *argv[]) {
           fin_cocina = 1;
         }
       } while (!fin_cocina || !fin_sala);
-
     } else {
       /* Proceso Cocina */
-
-
-      // de aqui 
       pthread_t hilo_preparacion, hilo_cocinar, hilo_emplatar;
 
+      /* Inicializar semáforos usados por los hilos de Cocina antes de
+         crearlos */
+      sem_init(&sem_ingredientes_listos, 0, 0);
+
+      sem_init(&sem_cocina, 0, 0);
+
+
+      /* Abrir la cola de mensajes para lectura en la Cocina */
+      struct mq_attr attr;
+      attr.mq_flags = 0;
+      attr.mq_maxmsg = 10;
+      attr.mq_msgsize = MAX_SIZE;
+      attr.mq_curmsgs = 0;
+
+      mq_cocina_fd = mq_open(NOMBRE_COLA, O_CREAT | O_RDONLY, 0644, &attr);
+      mq_cocina_fd == (mqd_t)-1;
+
+      printf("[Cocina] Comienzo de la preparación de platos...\n");
 
       pthread_create(&hilo_preparacion, NULL, preparar_ingredientes, NULL);
       pthread_create(&hilo_cocinar, NULL, cocinar, NULL);
       pthread_create(&hilo_emplatar, NULL, emplatar, NULL);
 
-      // Esperar finalización (aunque los hilos son infinitos)
+      /* Esperar finalización (bloqueante: los hilos corren indefinidamente) */
       pthread_join(hilo_preparacion, NULL);
       pthread_join(hilo_cocinar, NULL);
       pthread_join(hilo_emplatar, NULL);
-      printf("[Cocina] Comienzo de la preparación de platos...\n");
-
-
-
-      if (sem_init(&sem_ingredientes_listos, 0, 0) == -1) {
-        perror("Error al inicializar semáforo sem_ingredientes_listos");
-        exit(EXIT_FAILURE);
-      }
-      // hasta aqui esta chikistrikis
     }
 
   } else {
