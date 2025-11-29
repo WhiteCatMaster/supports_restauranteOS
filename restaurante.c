@@ -103,8 +103,8 @@ void *emplatar(void *arg) {
     sleep(tiempo_aleatorio(2, 4));
     printf("[Emplatado] Plato listo y emplatado.\n");
 
-    // Enviar la señal "SENYAL" al proceso sala mediante su PID obtenida de "pid_sala" para indicar que el plato ya está listo
-    kill(pid_sala, SENYAL);
+    // Enviar la señal SIGALRM al proceso sala mediante su PID obtenida de "pid_sala" para indicar que el plato ya está listo
+    kill(pid_sala, SIGALRM);
   }
 }
 
@@ -198,8 +198,8 @@ int main(int argc, char *argv[]) {
 
     int num_comanda = 0;
 
-    // Cuando le llegue la señal "SENYAL" (cuando el plato ha terminado de emplatarse) ejecutar la funcion "manejadorPlatoListo"
-    signal(SENYAL, manejadorPlatoListo);
+    // Cuando le llegue la señal SIGALRM (cuando el plato ha terminado de emplatarse) ejecutar la funcion "manejadorPlatoListo"
+    signal(SIGALRM, manejadorPlatoListo);
     
     // Bucle infinito que cada cierto tiempo simula la llegada de una comanda y la envía a la cocina mediante una cola de mensajes
     while (1) {
@@ -212,8 +212,7 @@ int main(int argc, char *argv[]) {
       sprintf(mensajeComanda, "Mesa_%d_Plato_del_dia", num_comanda);       
 
       mq_send(mq_cocina_fd, mensajeComanda, strlen(mensajeComanda) + 1, 1);
-        
-      
+
       num_comanda++;
     }
   }
