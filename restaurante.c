@@ -8,18 +8,21 @@
 #include <string.h>
 #include <sys/wait.h>
 #include <unistd.h>
+//Se define el nombre de la cola de mensajes a utilizar
 #define COLACOCINA "/cola_cocina"
+//Definimos los pid globalmente para que entre ellos se puedan leer
 pid_t pid_sala, pid_cocina;
+//Definimos la cola de mensajes para luego instanciarla
 mqd_t mq_cocina_fd;
 
-// Declarar los semáforos
+// Declarar los semáforos sin nombre del proceso cocina
 sem_t semIngredientesListos;
 sem_t semCocina;
 
-// Funcion que unicamente se encarga de imprimir por pantalla que un plato está
-// listo
+//Tratamiento a ejecutar cuando sala recibe la señal de parte de cocina al emplatar 
 void manejadorPlatoListo(int senial) {
   printf("[Sala] Señal recibida: Plato listo en cocina.\n");
+  signal(SIGALRM, manejadorPlatoListo); //Recaptura de la señal
 }
 
 // Funcion que devuelve un número aleatorio que será usado para los tiempos
@@ -27,8 +30,11 @@ void manejadorPlatoListo(int senial) {
 int tiempo_aleatorio(int min, int max) {
   return rand() % (max - min + 1) + min;
 }
+//Funcion tratamiento para cerrar los semaforos de la cocina cuando el padre
+//les mande la señal de terminar
 void cerrar_cocina(int senial) {
   printf("Eliminando semaforos de la cocina\n");
+  //Destruccion de los semaforos sin nombre
   int resultado = sem_destroy(&semIngredientesListos);
   if (resultado == -1) {
     printf("El semaforo de ingredientes no se cerro correctamente\n");
@@ -37,35 +43,46 @@ void cerrar_cocina(int senial) {
   if (resultado == -1) {
     printf("El semaforo de cocina no se cerro correctamente\n");
   }
+  //Se cierra la cola de mensajes de parte de la cocina si es que no esta cerrado todavia
   printf("Cerrando la cola de mensajes por parte de la cocina\n");
   if (mq_cocina_fd != -1) {
     mq_close(mq_cocina_fd);
   }
   exit(0);
 }
+//Funcion de tratamiento al detectar que el padre lo manda a cerrar la sala
 void cerrar_sala(int senial) {
+  //Se cierra la cola de mensajes por parte de la sala
   printf("Cerrando la cola de mensajes por parte de la sala\n");
   mq_close(mq_cocina_fd);
   exit(0);
 }
 // Logica que ejecuta al detectar el "crtl + c"
 void cerrar(int senial) {
+  //Si es que eres el padre mandale la señal de terminar al proceso sala
   if (pid_sala > 0) {
+    //Se manda la señal sigterm para que sala la capture y se cierre con su tratamiento
     kill(pid_sala, SIGTERM);
     int status;
+    //Espero a que se cierre la sala
     waitpid(pid_sala, &status, 0);
   }
+  //Si eres el padre mandale sigterm tambien al proceso cocina
   if (pid_cocina > 0) {
     kill(pid_cocina, SIGTERM);
     int estado;
+    //Espero a que se cierre el proceso cocina
     waitpid(pid_cocina, &estado, 0);
   }
+  //Elimina la cola de mensajes del sistema
   mq_unlink(COLACOCINA);
   exit(0);
   // signal(SIGINT, cerrar);
 }
-
+//Se define el tamaño maximo de bytes de los mensajes de la cola de mensajes
 #define MAX_SIZE 128
+//Se define el tamaño del buffer que se utilizara para manejar los mensajes recibidos
+// +1 para el '\0'
 #define MSG_BUFFER_SIZE (MAX_SIZE + 1)
 
 // Función que prepara los ingredientes
@@ -73,6 +90,7 @@ void *prepararIngredientes(void *args) {
   // Crear un char donde se guardarán las comandas de la cola, con longitu
   // "MSG_BUFFER_SIZE"
   char buffer[MSG_BUFFER_SIZE];
+  //Se crea una variable en la que se guardara el numero de bytes leidos
   ssize_t bytes_read;
 
   // Va a estar ejecutandose continuamente para prepara los ingredientes
@@ -108,8 +126,7 @@ void *prepararIngredientes(void *args) {
 
     // Enseñar por pantalla la comanda recibida, la cual antes se ha guardado en
     // "buffer"
-    printf("[Preparación] Recibida comanda: %s. Preparando ingredientes...\n",
-           buffer);
+    printf("[Preparación] Recibida comanda: %s. Preparando ingredientes...\n",buffer);
 
     // Esperar tiempo aleatorio para simular que se están preparando de verdad
     // los ingredientes
@@ -143,12 +160,14 @@ void *cocinar(void *arg) {
 void *emplatar(void *arg) {
 
   while (1) {
+    //Se espera hasta que se haya terminado de cocinar el plato
     sem_wait(&semCocina);
+    //Simulacion de emplatado
     printf("[Emplatado] Emplatando el plato...\n");
     sleep(tiempo_aleatorio(2, 4));
     printf("[Emplatado] Plato listo y emplatado.\n");
 
-    // Enviar la señal "SENYAL" al proceso sala mediante su PID obtenida de
+    // Enviar la señal "SIGALRM" al proceso sala mediante su PID obtenida de
     // "pid_sala" para indicar que el plato ya está listo
     kill(pid_sala, SIGALRM);
   }
@@ -157,15 +176,16 @@ void *emplatar(void *arg) {
 // Función main
 int main(int argc, char *argv[]) {
 
-  // Inicializar las variables que serán usadas
+  // Inicializar las variables que serán usadas para hacer que el padre
+  // espere a sus hijos
   int estado;
   int finCocina = 0;
   int finSala = 0;
   int pidFin;
 
   // Se crea un proceso hijo, por lo que hay dos procesos ejecutandose (proceso
-  // padre e hijo) El padre, "pid_sala" contiene el PID (Process ID) real del
-  // hijo, un número mayor que 0 En el hijo, "pid_sala" valdrá 0
+  // padre e hijo). Para el padre pid_sala es el pid del proceso sala y para el 
+  // hijo pid_sala es 0 
   pid_sala = fork();
 
   // Los procesos hijo tienen como valor 0, por lo que por este "if" solo lo
@@ -177,6 +197,7 @@ int main(int argc, char *argv[]) {
     // Misma lógica que con el anterior "if", aqui solo entrará el proceso padre
     // de cocina
     if (pid_cocina != 0) {
+      //Se captura la señal resultante de ctrl + c y se ejecuta la funcion cerrar
       signal(SIGINT, cerrar);
       do {
         // El "wait(&estado)" bloqueará al padre hasta que un hijo (cualquiera)
@@ -185,10 +206,12 @@ int main(int argc, char *argv[]) {
 
         // Aquí se hará la comprobación entre el pid del hijo (pidFin) y el del
         // padre (pid_sala o pid_cocina) para saber si el hijo que acaba de
-        // morir es de cocina o sala
+        // morir es cocina o sala
         if (pidFin == pid_sala) {
+          //Si es la sala se pone finSala a 1
           finSala = 1;
         } else if (pidFin == pid_cocina) {
+          //si es cocina lo mismo con su variable
           finCocina = 1;
         }
 
@@ -196,10 +219,12 @@ int main(int argc, char *argv[]) {
         // hayan muerto
       } while (!finCocina || !finSala);
 
+    } else {
       // Ruta alternativa del "if" a la que solo accederá el proceso hijo de
       // cocina
-    } else {
+      //Se captura la señal SIGINT para ignorarla en caso de que le llegue
       signal(SIGINT, SIG_IGN);
+      //Se captura la señal SIGTERM que le enviara su padre para cerra semaforos y colas
       signal(SIGTERM, cerrar_cocina);
 
       // Declarar los hilos que se usarán en el proceso cocina
@@ -243,10 +268,11 @@ int main(int argc, char *argv[]) {
     }
 
   } else {
-
+    // El proceso Sala
+    //Se captura e ignora la señal de ctrl + c si es que le llega al proceso sala
     signal(SIGINT, SIG_IGN);
-    // El hijo de proceso sala
     printf("[Sala] Inicio de la gestión de comandas...\n");
+    //Se captura la señal que le enviara el padre al querer cerrar la cola que tiene sala
     signal(SIGTERM, cerrar_sala);
     struct mq_attr attr;
     attr.mq_flags = 0;
@@ -258,11 +284,12 @@ int main(int argc, char *argv[]) {
     // solo se harán escrituras. "La sala escribe las comandas y la cocina las
     // lee"
     mq_cocina_fd = mq_open(COLACOCINA, O_CREAT | O_WRONLY, 0644, &attr);
+    //buffer para guardar los mensajes que le llegan de la cola 
     char mensajeComanda[MAX_SIZE];
-
+    //numero de comanda para la simulacion de comandas
     int num_comanda = 0;
 
-    // Cuando le llegue la señal "SENYAL" (cuando el plato ha terminado de
+    // Cuando le llegue la señal "SIGALRM" (cuando el plato ha terminado de
     // emplatarse) ejecutar la funcion "manejadorPlatoListo"
     signal(SIGALRM, manejadorPlatoListo);
 
@@ -274,11 +301,11 @@ int main(int argc, char *argv[]) {
       printf("[Sala] Recibida comanda de cliente. Solicitando plato de la "
              "comanda nº %d a la cocina...\n",
              num_comanda);
-
+      //Formateo del mensaje a enviar a la cola por parte de la sala para la cocina  
       sprintf(mensajeComanda, "Mesa_%d_Plato_del_dia", num_comanda);
-
+      //Se envia el mensaje
       mq_send(mq_cocina_fd, mensajeComanda, strlen(mensajeComanda) + 1, 1);
-
+      //Se aumenta el numero de comanda para la simulacion 
       num_comanda++;
     }
   }
